@@ -126,12 +126,21 @@ def main():
     calming_phase = False
     # add an instruction screen before the calming phase
     show_instructions = True
-    instructions = [
+    # Instructions shown at beginning vs after video
+    instructions_initial = [
         "Welcome to the Stressful Reflex Game!",
         "Click the red targets as they appear.",
         "Avoid wrong clicks or you'll hear beeps and buzzes!",
         "Press SPACE to begin the calming video."
     ]
+    instructions_after_video = [
+        "Feeling calmer?",
+        "Now get ready for the game!",
+        "",
+        "Press SPACE to start the stressful reflex game."
+    ]
+    instructions = instructions_initial
+    show_instructions_after_video = False
     score = 0
     interval = START_INTERVAL
     next_target_time = pygame.time.get_ticks() + interval
@@ -221,9 +230,9 @@ def main():
                         calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     if calming_audio_sound:
                         calming_audio_sound.play(-1)
-                elif calming_phase and event.key == pygame.K_SPACE:
-                    # skip remainder of calming video and start game immediately
-                    calming_phase = False
+                elif show_instructions_after_video and event.key == pygame.K_SPACE:
+                    # transition from post-calming instructions to game
+                    show_instructions_after_video = False
                     started = True
                     start_ticks = pygame.time.get_ticks()
                     if calming_audio_sound:
@@ -232,6 +241,15 @@ def main():
                         calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     if music_sound:
                         music_sound.play(-1)
+                elif calming_phase and event.key == pygame.K_SPACE:
+                    # skip remainder of calming video and show post-video instructions
+                    calming_phase = False
+                    show_instructions_after_video = True
+                    if calming_audio_sound:
+                        calming_audio_sound.stop()
+                    if calming_video:
+                        calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    instructions = instructions_after_video
 
         if started and now >= next_target_time and not target:
             target = Target()
@@ -244,16 +262,14 @@ def main():
             remaining_calm = max(0, 60 - elapsed_calm)
             
             if remaining_calm <= 0:
-                # Transition from calming to actual game
+                # Transition from calming to instruction screen
                 calming_phase = False
-                started = True
-                start_ticks = now
+                show_instructions_after_video = True
                 if calming_audio_sound:
                     calming_audio_sound.stop()
                 if calming_video:
                     calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # reset video
-                if music_sound:
-                    music_sound.play(-1)
+                instructions = instructions_after_video
             else:
                 # Display calming video
                 if calming_video:
@@ -292,6 +308,13 @@ def main():
             # draw a simple multi-line instruction screen
             y = HEIGHT // 2 - len(instructions) * 20
             for line in instructions:
+                text = font.render(line, True, (255, 255, 255))
+                screen.blit(text, (WIDTH // 2 - text.get_width() // 2, y))
+                y += 40
+        elif show_instructions_after_video:
+            # draw instructions after calming video
+            y = HEIGHT // 2 - len(instructions_after_video) * 20
+            for line in instructions_after_video:
                 text = font.render(line, True, (255, 255, 255))
                 screen.blit(text, (WIDTH // 2 - text.get_width() // 2, y))
                 y += 40
