@@ -2,6 +2,8 @@ import pygame
 import random
 import sys
 import numpy as np
+import cv2
+import os
 
 # Configuration
 WIDTH, HEIGHT = 800, 600
@@ -9,7 +11,7 @@ TARGET_RADIUS = 30
 START_INTERVAL = 1500  # milliseconds between targets
 MIN_INTERVAL = 300
 INTERVAL_DECREMENT = 50
-TOTAL_TIME = 60  # seconds
+TOTAL_TIME = 120  # seconds (extended to two minutes)
 
 # ensure mixer is initialized before generating sounds
 pygame.mixer.pre_init(44100, -16, 1, 512)
@@ -59,6 +61,40 @@ try:
     melody = np.concatenate(melody)
     music_sound = make_sound_from_wave(melody)
     music_sound.set_volume(0.2)
+    # load calming video
+    video_path = os.path.join(os.path.dirname(__file__), "CalmingVideo.mp4")
+    calming_video = None
+    calming_audio_sound = None
+    if os.path.exists(video_path):
+        try:
+            calming_video = cv2.VideoCapture(video_path)
+        except Exception as e:
+            print(f"Failed to load video: {e}")
+    
+    # Only play a dedicated CalmingMusic.ogg file during the video.
+    audio_extensions = ['.ogg']
+    audio_files = ['CalmingMusic']
+    script_dir = os.path.dirname(__file__)
+
+    audio_loaded = False
+    for audio_file in audio_files:
+        for ext in audio_extensions:
+            audio_path = os.path.join(script_dir, audio_file + ext)
+            if os.path.exists(audio_path):
+                try:
+                    calming_audio_sound = pygame.mixer.Sound(audio_path)
+                    calming_audio_sound.set_volume(0.5)
+                    audio_loaded = True
+                    print(f"Loaded calming music from: {audio_path}")
+                    break
+                except Exception as e:
+                    print(f"Failed to load calming music from {audio_path}: {e}")
+        if audio_loaded:
+            break
+
+    # silence if no dedicated calming music file exists
+    if not audio_loaded:
+        calming_audio_sound = None
 except Exception as e:
     print("Sound generation failed:", e)
 
@@ -87,17 +123,39 @@ class Target:
 def main():
     running = True
     started = False
+    calming_phase = False
+    # add an instruction screen before the calming phase
+    show_instructions = True
+    instructions = [
+        "Welcome to the Stressful Reflex Game!",
+        "Click the red targets as they appear.",
+        "Avoid wrong clicks or you'll hear beeps and buzzes!",
+        "Press SPACE to begin the calming video."
+    ]
     score = 0
     interval = START_INTERVAL
     next_target_time = pygame.time.get_ticks() + interval
     target = None
     start_ticks = None
+    calming_start_ticks = None
+    last_frame_time = 0
+    video_frame_delay = 0
 
     # for wrong click message
     wrong_show = False
     wrong_time = 0
-    # music speed multiplier
+    # music speed multiplier (will be multiplied on each successful hit)
     music_speed = 1.0
+    # slower acceleration factor to prevent runaway tempo
+    SPEED_INCREMENT = 1.02  # originally 1.05, lowered so 2‑minute game matches previous 45‑s tempo
+    
+    # Calculate video frame delay based on FPS
+    current_frame_surface = None
+    video_frame_delay = 33.33  # default to ~30 FPS
+    if calming_video:
+        fps = calming_video.get(cv2.CAP_PROP_FPS)
+        if fps > 0:
+            video_frame_delay = 1000.0 / fps  # milliseconds between frames
 
     def update_music(speed):
         global music_sound
@@ -133,8 +191,8 @@ def main():
                     target = None
                     interval = max(MIN_INTERVAL, interval - INTERVAL_DECREMENT)
                     next_target_time = now + interval
-                    # speed up music slightly
-                    music_speed *= 1.05
+                    # speed up music slightly with a gentler increment
+                    music_speed *= SPEED_INCREMENT
                     update_music(music_speed)
                 else:
                     # clicked wrong place -> stress cue (beep + buzz + flash)
@@ -150,21 +208,95 @@ def main():
                     pygame.display.flip()
                     pygame.time.delay(100)
             elif event.type == pygame.KEYDOWN:
-                if not started and event.key == pygame.K_SPACE:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+                elif not started and not calming_phase and show_instructions and event.key == pygame.K_SPACE:
+                    # advance from instruction screen into calming phase
+                    show_instructions = False
+                    calming_phase = True
+                    calming_start_ticks = pygame.time.get_ticks()
+                    last_frame_time = pygame.time.get_ticks()
+                    # reset video to beginning and play audio
+                    if calming_video:
+                        calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    if calming_audio_sound:
+                        calming_audio_sound.play(-1)
+                elif calming_phase and event.key == pygame.K_SPACE:
+                    # skip remainder of calming video and start game immediately
+                    calming_phase = False
                     started = True
                     start_ticks = pygame.time.get_ticks()
-                    # begin background music if available
+                    if calming_audio_sound:
+                        calming_audio_sound.stop()
+                    if calming_video:
+                        calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     if music_sound:
                         music_sound.play(-1)
-                elif event.key == pygame.K_ESCAPE:
-                    running = False
 
         if started and now >= next_target_time and not target:
             target = Target()
 
         screen.fill((30, 30, 30))
 
-        if not started:
+        # Handle calming phase
+        if calming_phase:
+            elapsed_calm = (now - calming_start_ticks) / 1000
+            remaining_calm = max(0, 60 - elapsed_calm)
+            
+            if remaining_calm <= 0:
+                # Transition from calming to actual game
+                calming_phase = False
+                started = True
+                start_ticks = now
+                if calming_audio_sound:
+                    calming_audio_sound.stop()
+                if calming_video:
+                    calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # reset video
+                if music_sound:
+                    music_sound.play(-1)
+            else:
+                # Display calming video
+                if calming_video:
+                    # Only read a new frame if enough time has passed
+                    time_since_last_frame = now - last_frame_time
+                    if time_since_last_frame >= video_frame_delay:
+                        ret, frame = calming_video.read()
+                        if ret:
+                            last_frame_time = now
+                            # Convert BGR to RGB
+                            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            # Resize frame to fit screen
+                            frame = cv2.resize(frame, (WIDTH, HEIGHT))
+                            # Convert frame to pygame surface
+                            current_frame_surface = pygame.image.fromstring(frame.tobytes(), frame.shape[1::-1], "RGB")
+                        else:
+                            # If video ends, reset it and make sure the audio is still playing
+                            calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            last_frame_time = now
+                            if calming_audio_sound:
+                                # restart audio in case it finished
+                                calming_audio_sound.play(-1)
+                    
+                    if current_frame_surface:
+                        screen.blit(current_frame_surface, (0, 0))
+                    else:
+                        screen.fill((20, 40, 50))  # blue background fallback
+                else:
+                    screen.fill((20, 40, 50))  # calming blue background fallback
+                
+                # Display countdown
+                countdown_text = font.render(f"Starting in {remaining_calm:.0f}s", True, (200, 220, 240))
+                screen.blit(countdown_text, (WIDTH // 2 - countdown_text.get_width() // 2, HEIGHT - 50))
+        
+        elif not started and show_instructions:
+            # draw a simple multi-line instruction screen
+            y = HEIGHT // 2 - len(instructions) * 20
+            for line in instructions:
+                text = font.render(line, True, (255, 255, 255))
+                screen.blit(text, (WIDTH // 2 - text.get_width() // 2, y))
+                y += 40
+        elif not started:
+            # if instructions are already dismissed but the game hasn't started (unlikely)
             intro = font.render("Press SPACE to start", True, (255, 255, 255))
             screen.blit(intro, (WIDTH // 2 - intro.get_width() // 2, HEIGHT // 2))
         else:
@@ -205,6 +337,9 @@ def main():
         pygame.display.flip()
         clock.tick(60)
 
+    # cleanup
+    if calming_video:
+        calming_video.release()
     pygame.quit()
     sys.exit()
 
