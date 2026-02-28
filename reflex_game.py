@@ -142,7 +142,6 @@ def main():
     ]
     instructions = instructions_initial
     show_instructions_after_video = False
-    video_was_skipped = False  # Track if video was skipped or completed
     instructions_auto_close_time = None  # Timer for auto-closing instructions
     paused = False  # Track if game is paused
     score = 0
@@ -164,7 +163,6 @@ def main():
     final_calm_end_time = None
     # after the final calming video we'll display a closing message
     show_final_message = False
-    final_message_time = None
 
     # for wrong click message
     wrong_show = False
@@ -331,7 +329,6 @@ def main():
                     # skip remainder of calming video and show post-video instructions
                     calming_phase = False
                     show_instructions_after_video = True
-                    video_was_skipped = True  # Mark that video was skipped
                     instructions_auto_close_time = None  # Don't auto-close if skipped
                     if calming_audio_sound:
                         calming_audio_sound.fadeout(300)
@@ -366,7 +363,6 @@ def main():
                 # Transition from calming to instruction screen
                 calming_phase = False
                 show_instructions_after_video = True
-                video_was_skipped = False  # Video was not skipped, played in full
                 instructions_auto_close_time = now + 5000  # Auto-close after 5 seconds
                 if calming_audio_sound:
                     calming_audio_sound.fadeout(300)
@@ -413,7 +409,6 @@ def main():
                 # transition to final message state instead of quitting immediately
                 final_calm = False
                 show_final_message = True
-                final_message_time = now
             else:
                 # behave similarly to calming_phase video display but no countdown
                 if calming_video:
