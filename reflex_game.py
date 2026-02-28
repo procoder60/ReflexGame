@@ -167,27 +167,57 @@ def main():
             video_frame_delay = 1000.0 / fps  # milliseconds between frames
 
     def update_music(speed):
+        import time
         global music_sound
         # if music already playing, fade it out to prevent pop
         if music_sound:
             try:
-                music_sound.fadeout(200)
+                music_sound.fadeout(300)
             except Exception:
                 music_sound.stop()
+            # Give fadeout time to complete before regenerating
+            time.sleep(0.15)
         # regenerate melody with new tempo
         notes = [220, 247, 262, 294, 330]
         melody = []
         secs_per_note = 0.4 / speed
-        for freq in notes:
-            t = np.linspace(0, secs_per_note, int(sample_rate * secs_per_note), False)
+        silence_time = 0.15  # 150ms silence between notes
+        
+        for i, freq in enumerate(notes):
+            # Generate a sine wave at this frequency
+            t = np.linspace(0, secs_per_note, int(sample_rate * secs_per_note), endpoint=False)
             tone = 0.3 * np.sin(2 * np.pi * freq * t)
+            
+            # Apply minimal and consistent fade to all tones
+            fade_samples = int(sample_rate * 0.01)  # 10ms fade
+            if fade_samples > 0 and len(tone) > fade_samples * 2:
+                tone[:fade_samples] *= np.linspace(0, 1, fade_samples)
+                tone[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+            
             melody.append(tone)
+            
+            # Add longer silence between notes
+            silence = np.zeros(int(sample_rate * silence_time))
+            melody.append(silence)
+        
         melody = np.concatenate(melody)
+        
+        # Add initial silence at the start to avoid zero-crossing click
+        initial_silence = np.zeros(int(sample_rate * 0.02))  # 20ms silence at start
+        melody = np.concatenate([initial_silence, melody])
+        
+        # Ensure the entire melody starts and ends at zero for clean looping
+        # Apply very gentle fade to loop point
+        loop_fade = int(sample_rate * 0.02)  # 20ms
+        if loop_fade > 0 and len(melody) > loop_fade * 2:
+            melody[:loop_fade] *= np.linspace(0, 1, loop_fade)
+            melody[-loop_fade:] *= np.linspace(1, 0, loop_fade)
+        
         music_sound = make_sound_from_wave(melody)
         music_sound.set_volume(0.2)
         if started and music_sound:
-            # start with a short fade-in to smooth the transition
-            music_sound.play(-1, fade_ms=200)
+            # start with a fade-in
+            music_sound.play(-1, fade_ms=300)
 
     while running:
         now = pygame.time.get_ticks()
@@ -206,9 +236,9 @@ def main():
                 else:
                     # clicked wrong place -> stress cue (beep + buzz + flash)
                     if beep_sound:
-                        beep_sound.play()
+                        beep_sound.play(fade_ms=50)
                     if buzz_sound:
-                        buzz_sound.play()
+                        buzz_sound.play(fade_ms=50)
                     # show WRONG! message briefly
                     wrong_show = True
                     wrong_time = now
@@ -229,24 +259,24 @@ def main():
                     if calming_video:
                         calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     if calming_audio_sound:
-                        calming_audio_sound.play(-1)
+                        calming_audio_sound.play(-1, fade_ms=300)
                 elif show_instructions_after_video and event.key == pygame.K_SPACE:
                     # transition from post-calming instructions to game
                     show_instructions_after_video = False
                     started = True
                     start_ticks = pygame.time.get_ticks()
                     if calming_audio_sound:
-                        calming_audio_sound.stop()
+                        calming_audio_sound.fadeout(300)
                     if calming_video:
                         calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    if music_sound:
-                        music_sound.play(-1)
+                    # Generate melody with initial speed and play it
+                    update_music(music_speed)
                 elif calming_phase and event.key == pygame.K_SPACE:
                     # skip remainder of calming video and show post-video instructions
                     calming_phase = False
                     show_instructions_after_video = True
                     if calming_audio_sound:
-                        calming_audio_sound.stop()
+                        calming_audio_sound.fadeout(300)
                     if calming_video:
                         calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     instructions = instructions_after_video
@@ -266,7 +296,7 @@ def main():
                 calming_phase = False
                 show_instructions_after_video = True
                 if calming_audio_sound:
-                    calming_audio_sound.stop()
+                    calming_audio_sound.fadeout(300)
                 if calming_video:
                     calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # reset video
                 instructions = instructions_after_video
@@ -291,7 +321,7 @@ def main():
                             last_frame_time = now
                             if calming_audio_sound:
                                 # restart audio in case it finished
-                                calming_audio_sound.play(-1)
+                                calming_audio_sound.play(-1, fade_ms=300)
                     
                     if current_frame_surface:
                         screen.blit(current_frame_surface, (0, 0))
@@ -339,9 +369,9 @@ def main():
             screen.blit(score_text, (WIDTH - 150, 10))
 
             if remaining <= 0:
-                # stop music
+                # stop music with fade-out
                 if music_sound:
-                    music_sound.stop()
+                    music_sound.fadeout(300)
                 over = font.render("Game Over!", True, (255, 0, 0))
                 score_final = font.render(f"Final Score: {score}", True, (255, 255, 255))
                 prompt = font.render("Press ESC to quit", True, (255, 0, 0))
