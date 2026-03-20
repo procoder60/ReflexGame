@@ -11,12 +11,20 @@ screen_info = pygame.display.Info()
 WIDTH = screen_info.current_w
 HEIGHT = screen_info.current_h - 40  # Reduce height slightly to keep title bar visible
 
+# Phases
+INITIAL_CALM_DURATION_SEC = 60  # initial calming video time
+TOTAL_GAME_TIME_SEC = 120  # stressful play time
+FINAL_CALM_DURATION_SEC = 300  # final calming video time
+
+# Game parameters
 TARGET_RADIUS = 30
 START_INTERVAL = 3000  # milliseconds between targets
 MIN_INTERVAL = 300
-INTERVAL_DECREMENT = 35
+INTERVAL_DECREMENT = 40
 INTERVAL_VARIATION = 0.7  # ±50% random variation (0.5 = 0.5 to 1.5 multiplier)
-TOTAL_TIME = 120  # seconds
+
+# Audio parameters
+AUDIO_NOTE_FADEOUT_MS = 300
 
 # ensure mixer is initialized before generating sounds
 pygame.mixer.pre_init(44100, -16, 1, 512)
@@ -128,7 +136,7 @@ class Target:
 
 def main():
     running = True
-    started = False
+    game_started = False
     calming_phase = False
     # add an instruction screen before the calming phase
     show_instructions = True
@@ -186,7 +194,7 @@ def main():
         # if music already playing, fade it out to prevent pop
         if music_sound:
             try:
-                music_sound.fadeout(300)
+                music_sound.fadeout(AUDIO_NOTE_FADEOUT_MS)
             except Exception:
                 music_sound.stop()
             # Give fadeout time to complete before regenerating
@@ -229,16 +237,16 @@ def main():
         
         music_sound = make_sound_from_wave(melody)
         music_sound.set_volume(0.2)
-        if started and music_sound:
+        if game_started and music_sound:
             # start with a fade-in
-            music_sound.play(-1, fade_ms=300)
+            music_sound.play(-1, fade_ms=AUDIO_NOTE_FADEOUT_MS)
 
     while running:
         now = pygame.time.get_ticks()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN and started:
+            elif event.type == pygame.MOUSEBUTTONDOWN and game_started:
                 if target and target.hit(event.pos):
                     score += 1
                     target = None
@@ -249,6 +257,7 @@ def main():
                     # speed up music slightly with a gentler increment
                     music_speed *= SPEED_INCREMENT
                     update_music(music_speed)
+                    
                 else:
                     # clicked wrong place -> stress cue (beep + buzz + flash)
                     if beep_sound:
@@ -272,17 +281,16 @@ def main():
                         new_pos = curr + jump_ms
                         # clamp depending on which phase
                         if calming_phase:
-                            new_pos = max(0, min(new_pos, 60000))
+                            new_pos = max(0, min(new_pos, INITIAL_CALM_DURATION_SEC * 1000))
                         else:  # final_calm
-                            # final calm starts at 60s offset
-                            new_pos = max(60000, new_pos)
-                            new_pos = min(new_pos, 60000 + 300000)
+                            new_pos = max(INITIAL_CALM_DURATION_SEC * 1000, new_pos)
+                            new_pos = min(new_pos, INITIAL_CALM_DURATION_SEC * 1000 + FINAL_CALM_DURATION_SEC * 1000)
                         calming_video.set(cv2.CAP_PROP_POS_MSEC, new_pos)
                     now = pygame.time.get_ticks()
                     if calming_phase:
                         # adjust calming start ticks so countdown reflects jump
                         elapsed = (now - calming_start_ticks) + jump_ms
-                        elapsed = max(0, min(elapsed, 60000))
+                        elapsed = max(0, min(elapsed, INITIAL_CALM_DURATION_SEC * 1000))
                         calming_start_ticks = now - int(elapsed)
                     else:  # final_calm
                         # move end time by opposite amount to maintain duration
@@ -290,7 +298,7 @@ def main():
                 elif event.key == pygame.K_ESCAPE:
                     if show_final_message:
                         running = False
-                    elif started and not paused:
+                    elif game_started and not paused:
                         # Pause the game and show quit confirmation
                         paused = True
                     elif paused:
@@ -299,7 +307,7 @@ def main():
                     else:
                         # Exit from menus
                         running = False
-                elif not started and not calming_phase and show_instructions and event.key == pygame.K_SPACE:
+                elif not game_started and not calming_phase and show_instructions and event.key == pygame.K_SPACE:
                     # advance from instruction screen into calming phase
                     show_instructions = False
                     calming_phase = True
@@ -309,18 +317,19 @@ def main():
                     if calming_video:
                         calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     if calming_audio_sound:
-                        calming_audio_sound.play(-1, fade_ms=300)
+                        calming_audio_sound.play(-1, fade_ms=AUDIO_NOTE_FADEOUT_MS)
                 elif paused and event.key == pygame.K_SPACE:
                     # Resume game from pause
+                    update_music(music_speed)
                     paused = False
                 elif show_instructions_after_video and event.key == pygame.K_SPACE:
                     # transition from post-calming instructions to game
                     show_instructions_after_video = False
-                    started = True
+                    game_started = True
                     start_ticks = pygame.time.get_ticks()
                     instructions_auto_close_time = None  # Clear auto-close timer
                     if calming_audio_sound:
-                        calming_audio_sound.fadeout(300)
+                        calming_audio_sound.fadeout(AUDIO_NOTE_FADEOUT_MS)
                     if calming_video:
                         calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     # Generate melody with initial speed and play it
@@ -331,25 +340,25 @@ def main():
                     show_instructions_after_video = True
                     instructions_auto_close_time = None  # Don't auto-close if skipped
                     if calming_audio_sound:
-                        calming_audio_sound.fadeout(300)
+                        calming_audio_sound.fadeout(AUDIO_NOTE_FADEOUT_MS)
                     if calming_video:
                         calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     instructions = instructions_after_video
                 # handle time adjustment during the reflex game using arrow keys
-                elif started and not paused:
+                elif game_started and not paused:
                     # calculate current elapsed time and adjust by ±10 seconds
                     now = pygame.time.get_ticks()
                     elapsed = (now - start_ticks) / 1000.0
                     if event.key == pygame.K_RIGHT:
                         # jump forward (decrease remaining time)
-                        new_elapsed = min(elapsed + 10.0, TOTAL_TIME)
+                        new_elapsed = min(elapsed + 10.0, TOTAL_GAME_TIME_SEC)
                         start_ticks = now - int(new_elapsed * 1000)
                     elif event.key == pygame.K_LEFT:
                         # jump backward (increase remaining time but not before start)
                         new_elapsed = max(elapsed - 10.0, 0.0)
                         start_ticks = now - int(new_elapsed * 1000)
 
-        if started and not paused and now >= next_target_time and not target:
+        if game_started and not paused and now >= next_target_time and not target:
             target = Target()
 
         screen.fill((30, 30, 30))
@@ -357,7 +366,7 @@ def main():
         # Handle calming phase
         if calming_phase:
             elapsed_calm = (now - calming_start_ticks) / 1000
-            remaining_calm = max(0, 60 - elapsed_calm)
+            remaining_calm = max(0, INITIAL_CALM_DURATION_SEC - elapsed_calm)
             
             if remaining_calm <= 0:
                 # Transition from calming to instruction screen
@@ -365,7 +374,7 @@ def main():
                 show_instructions_after_video = True
                 instructions_auto_close_time = now + 5000  # Auto-close after 5 seconds
                 if calming_audio_sound:
-                    calming_audio_sound.fadeout(300)
+                    calming_audio_sound.fadeout(AUDIO_NOTE_FADEOUT_MS)
                 if calming_video:
                     calming_video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # reset video
                 instructions = instructions_after_video
@@ -390,7 +399,7 @@ def main():
                             last_frame_time = now
                             if calming_audio_sound:
                                 # restart audio in case it finished
-                                calming_audio_sound.play(-1, fade_ms=300)
+                                calming_audio_sound.play(-1, fade_ms=AUDIO_NOTE_FADEOUT_MS)
                     
                     if current_frame_surface:
                         screen.blit(current_frame_surface, (0, 0))
@@ -421,10 +430,10 @@ def main():
                             frame = cv2.resize(frame, (WIDTH, HEIGHT))
                             current_frame_surface = pygame.image.fromstring(frame.tobytes(), frame.shape[1::-1], "RGB")
                         else:
-                            calming_video.set(cv2.CAP_PROP_POS_MSEC, 60000)
+                            calming_video.set(cv2.CAP_PROP_POS_MSEC, INITIAL_CALM_DURATION_SEC * 1000)
                             last_frame_time = now
                             if calming_audio_sound:
-                                calming_audio_sound.play(-1, fade_ms=300)
+                                calming_audio_sound.play(-1, fade_ms=AUDIO_NOTE_FADEOUT_MS)
                     if current_frame_surface:
                         screen.blit(current_frame_surface, (0, 0))
                     else:
@@ -432,6 +441,8 @@ def main():
                 else:
                     screen.fill((20, 40, 50))
         elif paused:
+            music_sound.fadeout(AUDIO_NOTE_FADEOUT_MS)
+
             # Show pause/quit confirmation screen with semi-transparent overlay
             overlay = pygame.Surface((WIDTH, HEIGHT))
             overlay.set_alpha(128)
@@ -445,7 +456,7 @@ def main():
             screen.blit(quit_text, (WIDTH // 2 - quit_text.get_width() // 2, HEIGHT // 2))
             screen.blit(continue_text, (WIDTH // 2 - continue_text.get_width() // 2, HEIGHT // 2 + 80))
         
-        elif not started and show_instructions:
+        elif not game_started and show_instructions:
             # draw a simple multi-line instruction screen
             y = HEIGHT // 2 - len(instructions) * 20
             for line in instructions:
@@ -457,7 +468,7 @@ def main():
             if instructions_auto_close_time is not None and now >= instructions_auto_close_time:
                 # Auto-transition to game
                 show_instructions_after_video = False
-                started = True
+                game_started = True
                 start_ticks = pygame.time.get_ticks()
                 instructions_auto_close_time = None
                 update_music(music_speed)
@@ -470,11 +481,16 @@ def main():
                     y += 40
         elif show_final_message:
             # closing screen after final calming
-            msg = "Well done! Time to relax."
+            calming_audio_sound.fadeout(AUDIO_NOTE_FADEOUT_MS)
+            msg = "Well done! Thank you for playing."
             msg_text = large_font.render(msg, True, (180, 220, 180))
+            score_final = font.render(f"Final Score: {score}", True, (255, 255, 255))
+            time_text = font.render(f"Play Time: {actual_play_time:.1f}s", True, (255, 255, 255))
             screen.fill((20, 50, 30))
             screen.blit(msg_text, (WIDTH // 2 - msg_text.get_width() // 2, HEIGHT // 2 - 80))
-        elif not started:
+            screen.blit(score_final, (WIDTH // 2 - score_final.get_width() // 2, HEIGHT // 2))
+            screen.blit(time_text, (WIDTH // 2 - time_text.get_width() // 2, HEIGHT // 2 + 40))
+        elif not game_started:
             # if instructions are already dismissed but the game hasn't started (unlikely)
             intro = font.render("Press SPACE to start", True, (255, 255, 255))
             screen.blit(intro, (WIDTH // 2 - intro.get_width() // 2, HEIGHT // 2))
@@ -487,7 +503,7 @@ def main():
                 wrong_show = False
             # Time remaining
             elapsed = (now - start_ticks) / 1000
-            remaining = max(0, TOTAL_TIME - elapsed)
+            remaining = max(0, TOTAL_GAME_TIME_SEC - elapsed)
             timer_text = font.render(f"Time: {remaining:.1f}s", True, (255, 255, 255))
             screen.blit(timer_text, (10, 10))
 
@@ -497,44 +513,30 @@ def main():
             if remaining <= 0:
                 # stop music with fade-out
                 if music_sound:
-                    music_sound.fadeout(300)
-                # record how long the player actually played (clamped to TOTAL_TIME)
-                actual_play_time = min(elapsed, TOTAL_TIME)
+                    music_sound.fadeout(AUDIO_NOTE_FADEOUT_MS)
+                # record how long the player actually played (clamped to TOTAL_GAME_TIME_SEC)
+                actual_play_time = min(elapsed, TOTAL_GAME_TIME_SEC)
                 # show summary screen for 5 seconds
                 if not show_summary and not final_calm and not show_final_message:
                     show_summary = True
                     summary_end_time = now + 5000
                 if show_summary:
-                    over = font.render("Well done! Time to relax...", True, (30, 0, 220))
-                    score_final = font.render(f"Final Score: {score}", True, (255, 255, 255))
-                    time_text = font.render(f"Play Time: {actual_play_time:.1f}s", True, (255, 255, 255))
+                    over = font.render("Well done! Please relax...", True, (30, 0, 220))
                     screen.blit(over, (WIDTH // 2 - over.get_width() // 2, HEIGHT // 2 - 40))
-                    screen.blit(score_final, (WIDTH // 2 - score_final.get_width() // 2, HEIGHT // 2))
-                    screen.blit(time_text, (WIDTH // 2 - time_text.get_width() // 2, HEIGHT // 2 + 40))
                     # hide target
                     target = None
                     # transition to final calming
                     if now >= summary_end_time:
                         show_summary = False
                         final_calm = True
-                        final_calm_end_time = now + 300000  # 5 minutes
+                        final_calm_end_time = now + FINAL_CALM_DURATION_SEC * 1000
                         # start video from 1 minute in
                         if calming_video:
-                            calming_video.set(cv2.CAP_PROP_POS_MSEC, 60000)
+                            calming_video.set(cv2.CAP_PROP_POS_MSEC, INITIAL_CALM_DURATION_SEC * 1000)
                         if calming_audio_sound:
-                            calming_audio_sound.play(-1, fade_ms=300)
+                            calming_audio_sound.play(-1, fade_ms=AUDIO_NOTE_FADEOUT_MS)
                         # reset any other state
                         target = None
-                else:
-                    over = font.render("Game Over!", True, (255, 0, 0))
-                    score_final = font.render(f"Final Score: {score}", True, (255, 255, 255))
-                    time_text = font.render(f"Play Time: {actual_play_time:.1f}s", True, (255, 255, 255))
-                    prompt = font.render("Press ESC to quit", True, (255, 0, 0))
-                    screen.blit(over, (WIDTH // 2 - over.get_width() // 2, HEIGHT // 2 - 40))
-                    screen.blit(score_final, (WIDTH // 2 - score_final.get_width() // 2, HEIGHT // 2))
-                    screen.blit(time_text, (WIDTH // 2 - time_text.get_width() // 2, HEIGHT // 2 + 40))
-                    screen.blit(prompt, (WIDTH // 2 - prompt.get_width() // 2, HEIGHT // 2 + 80))
-                    target = None
             else:
                 if target:
                     target.draw(screen)

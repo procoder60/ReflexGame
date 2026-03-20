@@ -5,10 +5,32 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
+            "name": "Reflex game",
             "type": "debugpy",
             "request": "launch",
             "program": "reflex_game.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Create plots",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "plot_mindmonitor.py",
+            "args": [
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\012.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\011.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\001.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\002.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\003.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\004.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\005.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\006.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\007.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\008.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\009.csv",
+                "c:\\Users\\noral\\OneDrive\\Documents\\Science fair 2026\\Data\\Study\\010.csv",
+                
+                "--no-show"],
             "console": "integratedTerminal"
         }
     ]
